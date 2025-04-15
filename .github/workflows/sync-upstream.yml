@@ -1,0 +1,82 @@
+name: Release Trigger Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM_REPO: test-sugaya-2/upstream
+  FORK_REPO: sugaya0204/fork #TODO:後で置き換える
+  TARGET_BRANCH: test/auto-merge
+  GH_TOKEN: ${{ github.token }}  
+  # SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FORK_REPO }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set Git user
+        run: |
+          git config --global user.email "your-actions-bot@github.com"
+          git config --global user.name "GitHub Actions Bot"
+      - name: Get GenU Release Version
+        run: |
+          GENU_VERSION=$(gh release view --repo ${{ env.UPSTREAM_REPO }} --json tagName | jq -r '.tagName')
+          echo "GENU_VERSION=$GENU_VERSION" >> $GITHUB_ENV
+      - name: Set Head Branch Name
+        run: |
+          echo "HEAD_BRANCH_NAME=upstream-release/${{ env.GENU_VERSION }}-${{ github.run_id }}" >> $GITHUB_ENV
+      - name: Sync GenU Release
+        run: |
+          echo $GENU_VERSION
+          echo $HEAD_BRANCH_NAME
+          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
+          git fetch upstream
+          git checkout -b $HEAD_BRANCH_NAME
+          git merge refs/tags/${{ env.GENU_VERSION }}
+          git push origin $HEAD_BRANCH_NAME
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v4
+        with: 
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "Sync GenU ${{ env.GENU_VERSION }}"
+          body: "Sync GenU ${{ env.GENU_VERSION }}"
+          base: main
+          branch: ${{env.HEAD_BRANCH_NAME}}
+          draft: false
+          commit-message: "Sync GenU ${{ env.GENU_VERSION }}"
+        # run: |
+        #   gh pr create --title "Sync GenU ${{ env.GENU_VERSION }}" --body "Sync GenU ${{ env.GENU_VERSION }}" --base main --head upstream-release/${{ env.GENU_VERSION }}
+        #   PR_URL=$(gh pr view --repo ${{ env.FORK_REPO }} --json url | jq -r '.url')
+        #   echo "PR_URL=$PR_URL" >> $GITHUB_ENV
+
+      # - name: Conflict Check
+      #   id: conflict-check
+      #   run: |
+      #     git checkout ${{ env.TARGET_BRANCH }}
+      #     git merge upstream-release/${{ env.GENU_VERSION }}
+      #     if git diff --quiet; then
+      #       echo '{"has_conflict": false}' >> $GITHUB_OUTPUT
+      #     else
+      #       echo '{"has_conflict": true}' >> $GITHUB_OUTPUT
+      #     fi
+      # - name: slack notification conflict
+      #   if: steps.conflict-check.outputs.has_conflict == 'true'
+      #   run: |
+      #     curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"GenU ${{ env.GENU_VERSION }} にコンフリクトが発生しました。PRを確認してください ${{ env.PR_URL }}\"}" ${{ env.SLACK_WEBHOOK }}
+
+      # - name: Auto Merge
+      #   if: steps.conflict-check.outputs.has_conflict == 'false'
+      #   run: gh pr merge --repo ${{ env.DEV_GENU_REPO }} --merge ${{ env.PR_URL }}
+      # - name: slack notification auto merge
+      #   if: steps.conflict-check.outputs.has_conflict == 'false'
+      #   run: |
+      #     curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"GenU ${{ env.GENU_VERSION }} を自動マージしました。PRを確認してください ${{ env.PR_URL }}\"}" ${{ env.SLACK_WEBHOOK }}
